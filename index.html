@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CYBERDECK_V2 // VIDEO_TERMINAL</title>
+    <style>
+        :root {
+            --neon-blue: #0ff;
+            --dim-blue: #005f73;
+            --bg-color: #050505;
+            --crt-scanline: rgba(0, 255, 255, 0.05);
+            --font-stack: 'Courier New', Courier, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--neon-blue);
+            font-family: var(--font-stack);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-shadow: 0 0 5px var(--neon-blue), 0 0 10px var(--dim-blue);
+        }
+
+        /* --- CRT EFFECTS --- */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(
+                to bottom,
+                rgba(255, 255, 255, 0),
+                rgba(255, 255, 255, 0) 50%,
+                rgba(0, 0, 0, 0.2) 50%,
+                rgba(0, 0, 0, 0.2)
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 10;
+            animation: scrollScanlines 10s linear infinite;
+        }
+
+        .glow-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle, rgba(0, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.8) 100%);
+            pointer-events: none;
+            z-index: 9;
+        }
+
+        /* --- TERMINAL CONTAINER --- */
+        .terminal-container {
+            width: 90%;
+            max-width: 900px;
+            height: 80vh;
+            border: 2px solid var(--dim-blue);
+            padding: 20px;
+            position: relative;
+            background: rgba(0, 10, 15, 0.9);
+            box-shadow: 0 0 20px var(--dim-blue), inset 0 0 20px rgba(0, 255, 255, 0.1);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Scrollbar Styling */
+        .terminal-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .terminal-container::-webkit-scrollbar-thumb {
+            background: var(--dim-blue);
+        }
+
+        .output-log {
+            flex-grow: 1;
+            margin-bottom: 10px;
+            font-size: 1rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .system-msg { color: var(--neon-blue); opacity: 0.8; }
+        .error-msg { color: #ff3333; text-shadow: 0 0 5px #ff0000; }
+        .history-link { 
+            cursor: pointer; 
+            text-decoration: underline; 
+            color: #fff;
+            transition: color 0.2s;
+        }
+        .history-link:hover { color: var(--neon-blue); background: rgba(0, 255, 255, 0.1); }
+
+        .input-area {
+            display: flex;
+            align-items: center;
+            border-top: 1px solid var(--dim-blue);
+            padding-top: 10px;
+        }
+
+        .prompt {
+            margin-right: 10px;
+            font-weight: bold;
+            user-select: none;
+        }
+
+        #cmdInput {
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: var(--font-stack);
+            font-size: 1.1rem;
+            flex-grow: 1;
+            outline: none;
+            text-shadow: 0 0 5px var(--neon-blue);
+            caret-color: var(--neon-blue);
+        }
+
+        /* --- VIDEO MODAL --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .video-box {
+            width: 80%;
+            max-width: 1000px;
+            border: 2px solid var(--neon-blue);
+            box-shadow: 0 0 30px var(--neon-blue);
+            background: #000;
+            position: relative;
+            transform: scale(0.9) rotateX(10deg);
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            animation: hologram-flicker 4s infinite;
+        }
+
+        .modal-overlay.active .video-box {
+            transform: scale(1) rotateX(0deg);
+        }
+
+        .aspect-ratio {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 */
+            height: 0;
+        }
+
+        .aspect-ratio iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .modal-header {
+            background: var(--dim-blue);
+            color: #000;
+            padding: 5px 10px;
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .close-btn {
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            font-family: var(--font-stack);
+            font-weight: bold;
+            color: #000;
+        }
+        .close-btn:hover { color: #fff; }
+
+        /* --- ANIMATIONS --- */
+        @keyframes scrollScanlines {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 100%; }
+        }
+
+        @keyframes hologram-flicker {
+            0% { box-shadow: 0 0 30px var(--neon-blue); border-color: var(--neon-blue); }
+            3% { box-shadow: 0 0 10px var(--dim-blue); border-color: rgba(0,255,255,0.5); }
+            6% { box-shadow: 0 0 30px var(--neon-blue); border-color: var(--neon-blue); }
+            100% { box-shadow: 0 0 30px var(--neon-blue); border-color: var(--neon-blue); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="scanlines"></div>
+    <div class="glow-overlay"></div>
+
+    <div class="terminal-container" id="terminal" onclick="document.getElementById('cmdInput').focus()">
+        <div class="output-log" id="output">
+            <div class="system-msg">INITIALIZING SYSTEM CORE...</div>
+            <div class="system-msg">LOADING VIDEO PROTOCOLS... [OK]</div>
+            <div class="system-msg">ACCESS GRANTED.</div>
+            <br>
+            <div>Welcome to <span style="color:#fff">CYBERDECK PLAYER</span>.</div>
+            <div>- Paste a YouTube Link to initialize stream.</div>
+            <div>- Type <span style="color:#fff">'history'</span> to view access logs.</div>
+            <div>- Type <span style="color:#fff">'clear'</span> to purge terminal.</div>
+            <br>
+        </div>
+        <div class="input-area">
+            <span class="prompt">netrunner@local:~#</span>
+            <input type="text" id="cmdInput" autocomplete="off" autofocus>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal">
+        <div class="video-box">
+            <div class="modal-header">
+                <span>Secure Stream Connection</span>
+                <button class="close-btn" onclick="closeModal()">[TERMINATE]</button>
+            </div>
+            <div class="aspect-ratio">
+                <iframe id="videoFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // -- STATE MANAGEMENT --
+        const historyKey = 'cyber_video_history';
+        const input = document.getElementById('cmdInput');
+        const output = document.getElementById('output');
+        const modal = document.getElementById('modal');
+        const iframe = document.getElementById('videoFrame');
+
+        // -- CORE FUNCTIONS --
+
+        // Parse YouTube URL to Embed URL
+        function getEmbedLink(url) {
+            let videoId = "";
+            
+            // Handle regular watch urls, short urls, and embed urls
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+            const match = url.match(regExp);
+
+            if (match && match[2].length === 11) {
+                videoId = match[2];
+                return `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
+            } else {
+                return null;
+            }
+        }
+
+        // Print to Terminal
+        function printLine(text, type = 'normal') {
+            const line = document.createElement('div');
+            if (type === 'error') line.classList.add('error-msg');
+            if (type === 'system') line.classList.add('system-msg');
+            line.innerHTML = text; // allow HTML for coloring
+            output.appendChild(line);
+            // Auto scroll to bottom
+            const terminalContainer = document.getElementById('terminal');
+            terminalContainer.scrollTop = terminalContainer.scrollHeight;
+        }
+
+        // Save to LocalStorage
+        function saveHistory(url) {
+            let history = JSON.parse(localStorage.getItem(historyKey)) || [];
+            // Avoid duplicates at the top of the stack
+            if(history[0] !== url) {
+                history.unshift(url);
+                // Limit history to 20 items
+                if(history.length > 20) history.pop();
+                localStorage.setItem(historyKey, JSON.stringify(history));
+            }
+        }
+
+        // Show History
+        function showHistory() {
+            let history = JSON.parse(localStorage.getItem(historyKey)) || [];
+            if (history.length === 0) {
+                printLine("No previous uplinks found.", "system");
+                return;
+            }
+            printLine("--- ACCESS LOGS ---", "system");
+            history.forEach((url, index) => {
+                // Create clickable elements
+                const linkId = `hist-${index}`;
+                // We construct HTML string with an onclick handler
+                const html = `[${index}] <span class="history-link" onclick="runFromHistory('${url}')">${url}</span>`;
+                printLine(html);
+            });
+            printLine("-------------------", "system");
+        }
+
+        // Launch Video
+        function launchVideo(url) {
+            const embedUrl = getEmbedLink(url);
+            
+            if (embedUrl) {
+                printLine(`> ESTABLISHING UPLINK: ${url}`, "system");
+                printLine(`> TARGET LOCKED. INITIALIZING STREAM...`, "system");
+                
+                // Save valid link
+                saveHistory(url);
+
+                // Open Modal
+                iframe.src = embedUrl;
+                modal.classList.add('active');
+            } else {
+                printLine(`ERROR: Invalid protocol or corrupted link data.`, "error");
+            }
+        }
+
+        // Helper for clicking history links
+        window.runFromHistory = function(url) {
+            input.value = url;
+            input.focus();
+        };
+
+        // Close Modal
+        window.closeModal = function() {
+            modal.classList.remove('active');
+            // Stop video by removing src
+            iframe.src = "";
+            printLine("> STREAM TERMINATED.", "system");
+            input.focus();
+        }
+
+        // -- EVENT LISTENERS --
+
+        // Handle Enter Key
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                const command = input.value.trim();
+                
+                // Echo the command
+                printLine(`<span style="opacity:0.5">root@cyberdeck:~#</span> ${command}`);
+                
+                input.value = ''; // Clear input
+
+                if (command === '') return;
+
+                if (command.toLowerCase() === 'history') {
+                    showHistory();
+                } else if (command.toLowerCase() === 'clear') {
+                    output.innerHTML = '';
+                    printLine("TERMINAL FLUSHED.", "system");
+                } else {
+                    // Assume it's a link
+                    launchVideo(command);
+                }
+            }
+        });
+
+        // Close modal on background click
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
